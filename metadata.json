@@ -1,0 +1,5 @@
+{
+  "name": "AI Learning Assistant",
+  "description": "A comprehensive learning system where AI generates lesson prompts from a table of contents, offering course generation, context-aware tips, and a continuous chat assistant.",
+  "requestFramePermissions": []
+}
