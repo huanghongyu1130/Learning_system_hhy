@@ -19,6 +19,7 @@ export interface Chapter {
   content: string | null; // The generated course content
   isGeneratingPrompt: boolean;
   isGeneratingContent: boolean;
+  chatHistory: ChatMessage[]; // Isolated chat history for this chapter
 }
 
 export interface Category {

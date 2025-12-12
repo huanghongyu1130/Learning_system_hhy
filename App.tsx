@@ -10,10 +10,10 @@ import CategoryModal from './components/CategoryModal';
 import AddChaptersModal from './components/AddChaptersModal';
 
 import {
-  generateCourseContent,
+  generateCourseContentStream,
   generateLessonPrompt,
   generateTip,
-  sendChatMessage,
+  sendChatMessageStream,
 } from './services/aiService';
 import {
   loginUser,
@@ -136,6 +136,15 @@ export default function App() {
     return null;
   }, [categories, activeChapterId]);
 
+  // Sync chat history when active chapter changes
+  useEffect(() => {
+    if (activeChapter) {
+      setChatHistory(activeChapter.chatHistory || []);
+    } else {
+      setChatHistory([]);
+    }
+  }, [activeChapter, activeChapterId]);
+
   // --- Handlers ---
 
   const handleAuthSubmit = async ({
@@ -219,6 +228,7 @@ export default function App() {
       content: null,
       isGeneratingPrompt: true,
       isGeneratingContent: false,
+      chatHistory: [],
     }));
 
     // Add chapters to category immediately
@@ -261,57 +271,148 @@ export default function App() {
     );
   };
 
+  const handleDeleteCategory = (id: string) => {
+    // If active chapter is in this category, clear it
+    const categoryToDelete = categories.find((c) => c.id === id);
+    if (categoryToDelete && activeChapterId) {
+      const hasActiveChapter = categoryToDelete.chapters.some((c) => c.id === activeChapterId);
+      if (hasActiveChapter) {
+        setActiveChapterId(null);
+        setChatHistory([]);
+      }
+    }
+    setCategories((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  const handleDeleteChapter = (categoryId: string, chapterId: string) => {
+    if (activeChapterId === chapterId) {
+      setActiveChapterId(null);
+      setChatHistory([]);
+    }
+
+    setCategories((prev) =>
+      prev.map((cat) => {
+        if (cat.id === categoryId) {
+          return {
+            ...cat,
+            chapters: cat.chapters.filter((c) => c.id !== chapterId),
+          };
+        }
+        return cat;
+      }),
+    );
+  };
+
   const handleGenerateContent = async () => {
     if (!activeChapter) return;
 
-    // Set generating state
+    // Initialize empty content and set generating state
     setCategories((prev) =>
       prev.map((cat) => ({
         ...cat,
         chapters: cat.chapters.map((c) =>
-          c.id === activeChapter.id ? { ...c, isGeneratingContent: true } : c,
+          c.id === activeChapter.id ? { ...c, isGeneratingContent: true, content: '' } : c,
         ),
       })),
     );
 
-    const content = await generateCourseContent(
+    await generateCourseContentStream(
       activeChapter.title,
       activeChapter.lessonPrompt,
       settings.generationAI,
       settings.language,
+      (chunk) => {
+        setCategories((prev) =>
+          prev.map((cat) => ({
+            ...cat,
+            chapters: cat.chapters.map((c) =>
+              c.id === activeChapter.id ? { ...c, content: chunk } : c,
+            ),
+          })),
+        );
+      }
     );
 
-    // Set content and clear generating state
+    // Clear generating state
     setCategories((prev) =>
       prev.map((cat) => ({
         ...cat,
         chapters: cat.chapters.map((c) =>
-          c.id === activeChapter.id ? { ...c, content, isGeneratingContent: false } : c,
+          c.id === activeChapter.id ? { ...c, isGeneratingContent: false } : c,
         ),
       })),
     );
   };
 
   const handleSendMessage = async (text: string) => {
+    if (!activeChapterId) return;
+
     const newUserMsg: ChatMessage = { id: uuidv4(), role: 'user', text, timestamp: Date.now() };
-    const updatedHistory = [...chatHistory, newUserMsg];
-    setChatHistory(updatedHistory);
+
+    // Create placeholder for AI message
+    const newAiMsgId = uuidv4();
+    const newAiMsgPlaceholder: ChatMessage = {
+      id: newAiMsgId,
+      role: 'model',
+      text: '', // Start empty
+      timestamp: Date.now(),
+    };
+
+    // Update local UI immediately with User message AND empty AI message
+    setChatHistory((prev) => [...prev, newUserMsg, newAiMsgPlaceholder]);
     setIsChatTyping(true);
 
-    const responseText = await sendChatMessage(
-      updatedHistory.map((m) => ({ role: m.role, text: m.text })),
+    // Sync to category state (User message)
+    setCategories(prev => prev.map(cat => ({
+      ...cat,
+      chapters: cat.chapters.map(c =>
+        c.id === activeChapterId
+          ? { ...c, chatHistory: [...(c.chatHistory || []), newUserMsg, newAiMsgPlaceholder] }
+          : c
+      )
+    })));
+
+    // Get context from active chapter
+    const currentChapter = categories
+      .flatMap(c => c.chapters)
+      .find(c => c.id === activeChapterId);
+
+    // Use the history BEFORE the new user message for context building appropriately
+    // But honestly, sending the current history including the new user message is fine, 
+    // but the `sendChatMessageStream` expects history array. 
+    // We should pass the updated history excluding the empty AI response we just added.
+    const historyForAi = [...chatHistory, newUserMsg].map((m) => ({ role: m.role, text: m.text }));
+
+    const contextContent = currentChapter?.content || null;
+
+    await sendChatMessageStream(
+      historyForAi,
       text,
       settings.chatAI,
       settings.language,
+      (chunk) => {
+        // Update both local chatHistory and Category state
+        setChatHistory((prev) =>
+          prev.map(msg => msg.id === newAiMsgId ? { ...msg, text: chunk } : msg)
+        );
+
+        setCategories((prev) => prev.map((cat) => ({
+          ...cat,
+          chapters: cat.chapters.map((c) =>
+            c.id === activeChapterId
+              ? {
+                ...c,
+                chatHistory: (c.chatHistory || []).map((msg) =>
+                  msg.id === newAiMsgId ? { ...msg, text: chunk } : msg,
+                ),
+              }
+              : c,
+          ),
+        })));
+      },
+      contextContent
     );
 
-    const newAiMsg: ChatMessage = {
-      id: uuidv4(),
-      role: 'model',
-      text: responseText,
-      timestamp: Date.now(),
-    };
-    setChatHistory([...updatedHistory, newAiMsg]);
     setIsChatTyping(false);
   };
 
@@ -319,7 +420,10 @@ export default function App() {
   const handleSelection = useCallback(
     async () => {
       const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) return;
+      if (!selection || selection.isCollapsed) {
+        setSelectionState((prev) => ({ ...prev, showFloatingButton: false }));
+        return;
+      }
 
       let node = selection.anchorNode;
       if (node && node.nodeType === Node.TEXT_NODE) node = node.parentElement;
@@ -443,6 +547,8 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onAddCategory={() => setIsCategoryModalOpen(true)}
         onAddChaptersToCategory={(id) => setAddChaptersModalState({ isOpen: true, categoryId: id })}
+        onDeleteCategory={handleDeleteCategory}
+        onDeleteChapter={handleDeleteChapter}
       />
 
       {/* Main Content */}

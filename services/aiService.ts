@@ -23,6 +23,88 @@ const parseSSEText = (text: string): string => {
   return result;
 };
 
+// Helper function to handle OpenAI-compatible requests (Streaming)
+const streamOpenAIRequest = async (
+  config: AIConfig,
+  messages: { role: string; content: string }[],
+  onChunk: (text: string) => void,
+  temperature: number = 0.7,
+): Promise<string> => {
+  let baseUrl = config.baseUrl;
+  if (!baseUrl) {
+    baseUrl = 'https://api.openai.com/v1';
+  }
+  baseUrl = baseUrl.replace(/\/$/, '');
+  const endpoint = `${baseUrl}/chat/completions`;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (config.apiKey) {
+    headers['Authorization'] = `Bearer ${config.apiKey}`;
+  }
+
+  const payload = {
+    model: config.model,
+    messages: messages,
+    temperature: temperature,
+    stream: true,
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`API Error ${response.status}: ${text || response.statusText}`);
+    }
+
+    if (!response.body) throw new Error('Response body is null');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep the last incomplete line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const dataStr = trimmed.substring(6).trim();
+          if (dataStr === '[DONE]') continue;
+          try {
+            const json = JSON.parse(dataStr);
+            const content = json.choices?.[0]?.delta?.content || '';
+            if (content) {
+              fullText += content;
+              onChunk(fullText);
+            }
+          } catch (e) {
+            console.warn('Error parsing stream chunk', e);
+          }
+        }
+      }
+    }
+    return fullText;
+  } catch (error) {
+    console.error('Stream Request Failed:', error);
+    throw error;
+  }
+};
+
 // Helper function to handle OpenAI-compatible requests
 const makeOpenAIRequest = async (
   config: AIConfig,
@@ -147,11 +229,12 @@ export const generateLessonPrompt = async (
   }
 };
 
-export const generateCourseContent = async (
+export const generateCourseContentStream = async (
   chapterTitle: string,
   lessonPrompt: string,
   config: AIConfig,
   language: string,
+  onChunk: (text: string) => void,
 ): Promise<string> => {
   const userPrompt = `
     Current Chapter: ${chapterTitle}
@@ -163,12 +246,18 @@ export const generateCourseContent = async (
   `;
 
   try {
-    return await makeOpenAIRequest(config, [
-      { role: 'system', content: config.basePrompt }, // Use the configured base prompt as System message
-      { role: 'user', content: userPrompt },
-    ]);
+    return await streamOpenAIRequest(
+      config,
+      [
+        { role: 'system', content: config.basePrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      onChunk
+    );
   } catch (error) {
-    return `Error generating content: ${(error as Error).message}`;
+    const errorMsg = `Error generating content: ${(error as Error).message}`;
+    onChunk(errorMsg);
+    return errorMsg;
   }
 };
 
@@ -193,28 +282,35 @@ export const generateTip = async (
   }
 };
 
-export const sendChatMessage = async (
+export const sendChatMessageStream = async (
   history: { role: 'user' | 'model'; text: string }[],
   newMessage: string,
   config: AIConfig,
   language: string,
+  onChunk: (text: string) => void,
+  contextContent?: string | null,
 ): Promise<string> => {
-  const systemInstruction = `${config.basePrompt}\n\nIMPORTANT: You must always respond in ${language}.`;
+  let systemInstruction = `${config.basePrompt}\n\nIMPORTANT: You must always respond in ${language}.`;
 
-  // Convert internal history format to OpenAI format
+  if (contextContent) {
+    systemInstruction += `\n\nCONTEXT FROM CURRENT LESSON:\n"""\n${contextContent}\n"""\n\nUse the above context to answer the user's questions if relevant.`;
+  }
+
   const messages = [
     { role: 'system', content: systemInstruction },
     ...history.map((h) => ({
-      role: h.role === 'model' ? 'assistant' : 'user', // Map 'model' to 'assistant'
+      role: h.role === 'model' ? 'assistant' : 'user',
       content: h.text,
     })),
     { role: 'user', content: newMessage },
   ];
 
   try {
-    return await makeOpenAIRequest(config, messages);
+    return await streamOpenAIRequest(config, messages, onChunk);
   } catch (error) {
     console.error('Chat error:', error);
-    return 'Sorry, I encountered an error processing your message.';
+    const errorMsg = 'Sorry, I encountered an error processing your message.';
+    onChunk(errorMsg);
+    return errorMsg;
   }
 };

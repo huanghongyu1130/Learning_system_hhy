@@ -7,6 +7,7 @@ import {
   Folder,
   FileText,
   Settings,
+  Trash2,
 } from 'lucide-react';
 import { Category } from '../types';
 
@@ -18,6 +19,8 @@ interface SidebarLeftProps {
   onOpenSettings: () => void;
   onAddCategory: () => void;
   onAddChaptersToCategory: (categoryId: string) => void;
+  onDeleteCategory: (id: string) => void;
+  onDeleteChapter: (categoryId: string, chapterId: string) => void;
 }
 
 const SidebarLeft: React.FC<SidebarLeftProps> = ({
@@ -28,6 +31,8 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({
   onOpenSettings,
   onAddCategory,
   onAddChaptersToCategory,
+  onDeleteCategory,
+  onDeleteChapter,
 }) => {
   return (
     <div className="w-64 bg-gray-50 dark:bg-gray-850 flex flex-col border-r border-gray-200 dark:border-gray-800 transition-colors duration-200 h-screen sticky top-0">
@@ -73,6 +78,18 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({
               >
                 <Plus size={14} />
               </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (window.confirm(`Are you sure you want to delete category "${category.title}"?`)) {
+                    onDeleteCategory(category.id);
+                  }
+                }}
+                className="p-1 opacity-0 group-hover:opacity-100 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-400 hover:text-red-500 ml-1"
+                title="Delete Category"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
 
             {/* Chapters List */}
@@ -85,18 +102,31 @@ const SidebarLeft: React.FC<SidebarLeftProps> = ({
                   <button
                     key={chapter.id}
                     onClick={() => onSelectChapter(chapter.id)}
-                    className={`w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2
-                      ${
-                        activeChapterId === chapter.id
-                          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
-                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    className={`w-full text-left px-2 py-1.5 rounded-md text-sm transition-colors flex items-center gap-2 group/chapter justify-between
+                      ${activeChapterId === chapter.id
+                        ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium'
+                        : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                       }`}
                   >
-                    <FileText
-                      size={14}
-                      className={activeChapterId === chapter.id ? 'text-blue-500' : 'text-gray-400'}
-                    />
-                    <span className="truncate">{chapter.title}</span>
+                    <div className="flex-1 truncate flex items-center gap-2">
+                      <FileText
+                        size={14}
+                        className={activeChapterId === chapter.id ? 'text-blue-500' : 'text-gray-400'}
+                      />
+                      <span className="truncate">{chapter.title}</span>
+                    </div>
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm(`Delete chapter "${chapter.title}"?`)) {
+                          onDeleteChapter(category.id, chapter.id);
+                        }
+                      }}
+                      className="opacity-0 group-hover/chapter:opacity-100 p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded text-red-300 hover:text-red-500"
+                      title="Delete Chapter"
+                    >
+                      <Trash2 size={12} />
+                    </div>
                   </button>
                 ))}
               </div>
