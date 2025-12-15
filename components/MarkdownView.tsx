@@ -29,9 +29,11 @@ const MarkdownView: React.FC<MarkdownViewProps> = ({ content, className = '' }) 
     finalContent = content.replace(match[0], '').trim();
   }
 
+  const isThinkingComplete = content.includes('</think>');
+
   return (
     <div className={`markdown-body ${className}`}>
-      {thoughtContent && <ThinkBlock content={thoughtContent} />}
+      {thoughtContent && <ThinkBlock content={thoughtContent} isComplete={isThinkingComplete} />}
       {finalContent && (
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}

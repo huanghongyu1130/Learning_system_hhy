@@ -33,6 +33,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'model';
   text: string;
+  images?: string[]; // Array of base64 data URIs
   timestamp: number;
 }
 

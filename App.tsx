@@ -344,10 +344,16 @@ export default function App() {
     );
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, images?: string[]) => {
     if (!activeChapterId) return;
 
-    const newUserMsg: ChatMessage = { id: uuidv4(), role: 'user', text, timestamp: Date.now() };
+    const newUserMsg: ChatMessage = {
+      id: uuidv4(),
+      role: 'user',
+      text,
+      images,
+      timestamp: Date.now()
+    };
 
     // Create placeholder for AI message
     const newAiMsgId = uuidv4();
@@ -378,10 +384,12 @@ export default function App() {
       .find(c => c.id === activeChapterId);
 
     // Use the history BEFORE the new user message for context building appropriately
-    // But honestly, sending the current history including the new user message is fine, 
-    // but the `sendChatMessageStream` expects history array. 
-    // We should pass the updated history excluding the empty AI response we just added.
-    const historyForAi = [...chatHistory, newUserMsg].map((m) => ({ role: m.role, text: m.text }));
+    // We pass the full history including images to the service
+    const historyForAi = [...chatHistory, newUserMsg].map((m) => ({
+      role: m.role,
+      text: m.text,
+      images: m.images
+    }));
 
     const contextContent = currentChapter?.content || null;
 
@@ -410,7 +418,8 @@ export default function App() {
           ),
         })));
       },
-      contextContent
+      contextContent,
+      images // Pass new images separately for the current turn
     );
 
     setIsChatTyping(false);

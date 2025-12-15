@@ -282,13 +282,28 @@ export const generateTip = async (
   }
 };
 
+// Helper to format message content for OpenAI Vision
+const formatMessageContent = (text: string, images?: string[]) => {
+  if (!images || images.length === 0) {
+    return text;
+  }
+  return [
+    { type: 'text', text },
+    ...images.map((img) => ({
+      type: 'image_url',
+      image_url: { url: img },
+    })),
+  ];
+};
+
 export const sendChatMessageStream = async (
-  history: { role: 'user' | 'model'; text: string }[],
+  history: { role: 'user' | 'model'; text: string; images?: string[] }[],
   newMessage: string,
   config: AIConfig,
   language: string,
   onChunk: (text: string) => void,
   contextContent?: string | null,
+  newImages?: string[],
 ): Promise<string> => {
   let systemInstruction = `${config.basePrompt}\n\nIMPORTANT: You must always respond in ${language}.`;
 
@@ -300,12 +315,13 @@ export const sendChatMessageStream = async (
     { role: 'system', content: systemInstruction },
     ...history.map((h) => ({
       role: h.role === 'model' ? 'assistant' : 'user',
-      content: h.text,
+      content: formatMessageContent(h.text, h.images),
     })),
-    { role: 'user', content: newMessage },
+    { role: 'user', content: formatMessageContent(newMessage, newImages) },
   ];
 
   try {
+    // @ts-expect-error - OpenAI types for messages are complex, but this structure is valid for vision
     return await streamOpenAIRequest(config, messages, onChunk);
   } catch (error) {
     console.error('Chat error:', error);
